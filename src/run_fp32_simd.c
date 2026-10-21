@@ -221,57 +221,11 @@ void softmax(float* x, int size) {
     }
 }
 
-void matmul(float* xout, float* x, float* w, int n, int d) {
-    // W (d,n) @ x (n,) -> xout (d,)
-    // by far the most amount of time is spent inside this little function
-    // use ARM NEON SIMD instructions for efficient computation
+// Basic NEON kernel: one row at a time, 4 columns at a time.
+// Computes rows [row_start, d). Also used by matmul_4row for leftover rows.
+static void matmul_basic_rows(float* xout, float* x, float* w, int n, int row_start, int d) {
     int i, j;
-
-    // for (i = 0; i + 4 <= d; i += 4) {
-    //     float32x4_t val1 = vdupq_n_f32(0.0f);
-    //     float32x4_t val2 = vdupq_n_f32(0.0f);
-    //     float32x4_t val3 = vdupq_n_f32(0.0f);
-    //     float32x4_t val4 = vdupq_n_f32(0.0f);
-
-    //     for (j = 0; j + 4 <= n; j += 4) {
-    //         // load 4 x values starting at index j:
-    //         float32x4_t x_val = vld1q_f32(x + j);
-            
-    //         // Load 4 consecutive weights for each of the 4 rows starting at column j
-    //         float32x4_t w1 = vld1q_f32(w + (size_t) i * n + j);
-    //         float32x4_t w2 = vld1q_f32(w + (size_t)(i + 1) * n + j);
-    //         float32x4_t w3 = vld1q_f32(w + (size_t)(i + 2) * n + j);
-    //         float32x4_t w4 = vld1q_f32(w + (size_t)(i + 3) * n + j);
-
-    //         // fused multiply-add: val = val + w * x
-    //         val1 = vfmaq_f32(val1, w1, x_val);
-    //         val2 = vfmaq_f32(val2, w2, x_val);
-    //         val3 = vfmaq_f32(val3, w3, x_val);
-    //         val4 = vfmaq_f32(val4, w4, x_val);
-    //     }
-    //     // Reduce the 4 lanes into a temporary scalar sum for each row
-    //     float sum1 = vaddvq_f32(val1);
-    //     float sum2 = vaddvq_f32(val2);
-    //     float sum3 = vaddvq_f32(val3);
-    //     float sum4 = vaddvq_f32(val4);
-
-    //     // Clean up column leftovers (columns remaining if n % 4 != 0)
-    //     for (; j < n; j++) {
-    //         sum1 += w[(size_t)(i + 0) * n + j] * x[j];
-    //         sum2 += w[(size_t)(i + 1) * n + j] * x[j];
-    //         sum3 += w[(size_t)(i + 2) * n + j] * x[j];
-    //         sum4 += w[(size_t)(i + 3) * n + j] * x[j];
-    //     }
-
-    //     // Store the completed results back into xout
-    //     xout[i + 0] = sum1;
-    //     xout[i + 1] = sum2;
-    //     xout[i + 2] = sum3;
-    //     xout[i + 3] = sum4;
-    // }
-
-    // Handle any remaining rows if d is not a multiple of 4
-    for (i = 0; i < d; i++) {
+    for (i = row_start; i < d; i++) {
         float32x4_t val = vdupq_n_f32(0.0f);
         for (j = 0; j + 4 <= n; j += 4) {
             float32x4_t w_val = vld1q_f32(w + (size_t)i * n + j);
@@ -279,11 +233,79 @@ void matmul(float* xout, float* x, float* w, int n, int d) {
             val = vfmaq_f32(val, w_val, x_val);
         }
         float sum = vaddvq_f32(val);
+        // Clean up column leftovers (columns remaining if n % 4 != 0)
         for (; j < n; j++) {
             sum += w[(size_t)i * n + j] * x[j];
         }
         xout[i] = sum;
     }
+}
+
+void matmul_basic(float* xout, float* x, float* w, int n, int d) {
+    matmul_basic_rows(xout, x, w, n, 0, d);
+}
+
+// 4-row NEON kernel: 4 rows at a time, 4 columns at a time.
+// Each x load is reused across 4 rows, and the 4 accumulators are independent.
+void matmul_4row(float* xout, float* x, float* w, int n, int d) {
+    int i, j;
+
+    for (i = 0; i + 4 <= d; i += 4) {
+        float32x4_t val1 = vdupq_n_f32(0.0f);
+        float32x4_t val2 = vdupq_n_f32(0.0f);
+        float32x4_t val3 = vdupq_n_f32(0.0f);
+        float32x4_t val4 = vdupq_n_f32(0.0f);
+
+        for (j = 0; j + 4 <= n; j += 4) {
+            // load 4 x values starting at index j:
+            float32x4_t x_val = vld1q_f32(x + j);
+
+            // Load 4 consecutive weights for each of the 4 rows starting at column j
+            float32x4_t w1 = vld1q_f32(w + (size_t) i * n + j);
+            float32x4_t w2 = vld1q_f32(w + (size_t)(i + 1) * n + j);
+            float32x4_t w3 = vld1q_f32(w + (size_t)(i + 2) * n + j);
+            float32x4_t w4 = vld1q_f32(w + (size_t)(i + 3) * n + j);
+
+            // fused multiply-add: val = val + w * x
+            val1 = vfmaq_f32(val1, w1, x_val);
+            val2 = vfmaq_f32(val2, w2, x_val);
+            val3 = vfmaq_f32(val3, w3, x_val);
+            val4 = vfmaq_f32(val4, w4, x_val);
+        }
+        // Reduce the 4 lanes into a temporary scalar sum for each row
+        float sum1 = vaddvq_f32(val1);
+        float sum2 = vaddvq_f32(val2);
+        float sum3 = vaddvq_f32(val3);
+        float sum4 = vaddvq_f32(val4);
+
+        // Clean up column leftovers (columns remaining if n % 4 != 0)
+        for (; j < n; j++) {
+            sum1 += w[(size_t)(i + 0) * n + j] * x[j];
+            sum2 += w[(size_t)(i + 1) * n + j] * x[j];
+            sum3 += w[(size_t)(i + 2) * n + j] * x[j];
+            sum4 += w[(size_t)(i + 3) * n + j] * x[j];
+        }
+
+        // Store the completed results back into xout
+        xout[i + 0] = sum1;
+        xout[i + 1] = sum2;
+        xout[i + 2] = sum3;
+        xout[i + 3] = sum4;
+    }
+
+    // Handle any remaining rows if d is not a multiple of 4
+    matmul_basic_rows(xout, x, w, n, i, d);
+}
+
+void matmul(float* xout, float* x, float* w, int n, int d) {
+    // W (d,n) @ x (n,) -> xout (d,)
+    // by far the most amount of time is spent inside this little function
+    // Pick the kernel at compile time: -DSIMD_4ROW selects the 4-row version
+#ifdef SIMD_4ROW
+    matmul_4row(xout, x, w, n, d);
+#else
+    matmul_basic(xout, x, w, n, d);
+#endif
 }
 
 float* forward(Transformer* transformer, int token, int pos) {
