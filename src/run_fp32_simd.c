@@ -227,13 +227,13 @@ void matmul(float* xout, float* x, float* w, int n, int d) {
     // use ARM NEON SIMD instructions for efficient computation
     int i, j;
 
-    for (i = 0; i < d - 4; i+= 4) {
+    for (i = 0; i + 4 <= d; i += 4) {
         float32x4_t val1 = vdupq_n_f32(0.0f);
         float32x4_t val2 = vdupq_n_f32(0.0f);
         float32x4_t val3 = vdupq_n_f32(0.0f);
         float32x4_t val4 = vdupq_n_f32(0.0f);
 
-        for (j = 0; j < n - 4; j+=4) {
+        for (j = 0; j + 4 <= n; j += 4) {
             // load 4 x values starting at index j:
             float32x4_t x_val = vld1q_f32(x + j);
             
@@ -271,15 +271,15 @@ void matmul(float* xout, float* x, float* w, int n, int d) {
     }
 
     // Handle any remaining rows if d is not a multiple of 4
-    for (i = 0; i < d; i++) {
+    for (; i < d; i++) {
         float32x4_t val = vdupq_n_f32(0.0f);
-        for (j = 0; j < n - 4; j+= 4) {
+        for (j = 0; j + 4 <= n; j += 4) {
             float32x4_t w_val = vld1q_f32(w + (size_t)i * n + j);
             float32x4_t x_val = vld1q_f32(x + j);
             val = vfmaq_f32(val, w_val, x_val);
         }
         float sum = vaddvq_f32(val);
-        for (int j = 0; j < n; j++) {
+        for (; j < n; j++) {
             sum += w[(size_t)i * n + j] * x[j];
         }
         xout[i] = sum;
