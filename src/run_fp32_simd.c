@@ -4,7 +4,10 @@
  * @author TODO: Update author name
  **/
 
-
+#ifndef _WIN32
+// clock_gettime/CLOCK_REALTIME are POSIX, hidden by glibc under strict -std=c23
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "run_fp32_simd.h"
 #include <stdio.h>
 #include <stdlib.h>
