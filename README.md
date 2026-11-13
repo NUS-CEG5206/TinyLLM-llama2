@@ -18,9 +18,8 @@ The project structure follows the [cpp-best-practices CMake template](https://gi
 - `build/` holds the local build. `build-docker/` and `build-docker-gprof/` hold the container builds made by `profile.sh` (normal and `-pg`). None are tracked by git.
 - `logs/profile/<run-id>/` holds each profiling run: `results.csv`, `perplexity.csv`, `next_token_agreement.csv`, `system.txt`, one folder of profiler output per binary, and the generated `figures/` and `tables/`.
 - `plots/` holds the Python analysis scripts: `data_summary.py` loads a run, `plots.py` draws the figures and `main_table.py` builds the summary table.
-- `report/` holds the engineering report and the presentation slides.
 
-## INT8 baseline (Linux / Docker)
+## Model setup
 
 The INT8 baseline runs the model in C using scalar, single-threaded matrix-vector multiplication. Weights and activation vectors use grouped INT8 quantization with FP32 scales. Products accumulate in INT32, and the output remains FP32.
 
@@ -36,6 +35,15 @@ Run the following commands from the project root inside the Docker container.
 - models/tokenizer.bin (matching the model)
 
 Make sure `models/stories110M.pt` has been copied over completely before exporting the model.
+
+### Download the checkpoint and tokenizer
+
+The model files are not stored in the repository. Download them into `models/`:
+
+```bash
+curl -L -o models/stories110M.pt https://huggingface.co/karpathy/tinyllamas/resolve/main/stories110M.pt
+curl -L -o models/tokenizer.bin https://raw.githubusercontent.com/karpathy/llama2.c/master/tokenizer.bin
+```
 
 ### One-time Python setup for model conversion
 
@@ -110,7 +118,7 @@ Docker is used to ensure a consistent environment for profiling and benchmarking
 docker compose build
 
 # Run the profiling script inside the Docker container (RUNS = measured repeats per prompt, default 5)
-docker compose run --rm -e RUNS=10 bench bash scripts/profile.sh
+docker compose run --rm bench bash scripts/profile.sh
 
 # Run the next-token agreement check on its own
 docker compose run --rm bench bash scripts/agreement.sh
@@ -151,7 +159,7 @@ To regenerate the benchmark prompts from the TinyStories validation set (fixed s
 
 ```bash
 # Defaults: 20 prompts, seed 42, written to data/prompts.txt
-python3 scripts/make_prompts.py -n 20 -s 42 -o data/prompts.txt
+python3 scripts/make_prompts.py -n 10 -s 42 -o data/prompts.txt
 ```
 
 ## Acknowledgments

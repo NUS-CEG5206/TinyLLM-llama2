@@ -25,7 +25,7 @@ cmake --build build
 
 # Check if the model exists before quantizing
 if [ ! -f "models/stories110M.pt" ]; then
-  echo "ExitingL Model not found. Please download the model from https://huggingface.co/Stories/stories110M and place it in the models directory."
+  echo "Exiting: Model not found. Please download the model from https://huggingface.co/karpathy/tinyllamas/resolve/main/stories110M.pt and place it in the models directory."
 fi
 
 # Check if fp32, int8 and fp16 models exist, if not, build them

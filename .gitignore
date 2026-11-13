@@ -111,3 +111,6 @@ build-docker-*/
 # Temporary files
 *.tmp
 reports/
+
+# Python cache
+__pycache__/
